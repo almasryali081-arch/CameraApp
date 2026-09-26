@@ -1,11 +1,18 @@
 package com.example.cameraapp;
 
 import android.Manifest;
+import android.content.ContentValues;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.util.Log;
+import android.widget.Button;
+import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.ImageCapture;
+import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.Preview;
 import androidx.camera.extensions.ExtensionMode;
 import androidx.camera.extensions.ExtensionsManager;
@@ -14,12 +21,15 @@ import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.google.common.util.concurrent.ListenableFuture;
+import java.text.SimpleDateFormat;
+import java.util.Locale;
 import java.util.concurrent.ExecutionException;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "CameraApp";
     private PreviewView previewView;
+    private ImageCapture imageCapture;
     private static final int REQUEST_CODE_PERMISSIONS = 10;
     private static final String[] REQUIRED_PERMISSIONS = {Manifest.permission.CAMERA};
 
@@ -28,6 +38,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         previewView = findViewById(R.id.previewView);
+
+        Button captureButton = findViewById(R.id.captureButton);
+        captureButton.setOnClickListener(v -> takePhoto());
 
         if (allPermissionsGranted()) {
             startCamera();
@@ -77,21 +90,26 @@ public class MainActivity extends AppCompatActivity {
                                 baseCameraSelector, ExtensionMode.NIGHT);
 
                         if (nightAvailable) {
-                            Log.d(TAG, "الوضع الليلي متوفر على هذا الجهاز ✅");
+                            Log.d(TAG, "Night mode available");
                             cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(
                                     baseCameraSelector, ExtensionMode.NIGHT);
                         } else {
-                            Log.d(TAG, "الوضع الليلي غير مدعوم على هذا الجهاز ❌ - سيتم استخدام الكاميرا العادية");
+                            Log.d(TAG, "Night mode not supported");
                         }
 
                         Preview preview = new Preview.Builder().build();
                         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
+                        imageCapture = new ImageCapture.Builder()
+                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                                .build();
+
                         cameraProvider.unbindAll();
-                        cameraProvider.bindToLifecycle(this, cameraSelector, preview);
+                        cameraProvider.bindToLifecycle(
+                                this, cameraSelector, preview, imageCapture);
 
                     } catch (ExecutionException | InterruptedException e) {
-                        Log.e(TAG, "خطأ بتفعيل الإضافات: " + e.getMessage());
+                        Log.e(TAG, "Extensions error: " + e.getMessage());
                     }
                 }, ContextCompat.getMainExecutor(this));
 
@@ -99,5 +117,42 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
         }, ContextCompat.getMainExecutor(this));
+    }
+
+    private void takePhoto() {
+        if (imageCapture == null) return;
+
+        String name = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
+                .format(System.currentTimeMillis());
+
+        ContentValues contentValues = new ContentValues();
+        contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+        contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg");
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+            contentValues.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/CameraApp");
+        }
+
+        ImageCapture.OutputFileOptions outputOptions = new ImageCapture.OutputFileOptions.Builder(
+                getContentResolver(),
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                contentValues
+        ).build();
+
+        imageCapture.takePicture(
+                outputOptions,
+                ContextCompat.getMainExecutor(this),
+                new ImageCapture.OnImageSavedCallback() {
+                    @Override
+                    public void onImageSaved(ImageCapture.OutputFileResults outputFileResults) {
+                        Toast.makeText(getBaseContext(), "تم حفظ الصورة ✅", Toast.LENGTH_SHORT).show();
+                    }
+
+                    @Override
+                    public void onError(ImageCaptureException exception) {
+                        Log.e(TAG, "خطأ بالتقاط الصورة: " + exception.getMessage());
+                        Toast.makeText(getBaseContext(), "فشل الالتقاط ❌", Toast.LENGTH_SHORT).show();
+                    }
+                }
+        );
     }
 }
