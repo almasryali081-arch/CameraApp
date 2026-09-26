@@ -7,7 +7,10 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.util.Log;
-import android.widget.Button;
+import android.view.View;
+import android.widget.ImageButton;
+import android.widget.LinearLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
@@ -29,7 +32,9 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "CameraApp";
     private PreviewView previewView;
+    private View nightVisionOverlay;
     private ImageCapture imageCapture;
+    private boolean nightModeOn = false;
     private static final int REQUEST_CODE_PERMISSIONS = 10;
     private static final String[] REQUIRED_PERMISSIONS = {Manifest.permission.CAMERA};
 
@@ -38,14 +43,57 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         previewView = findViewById(R.id.previewView);
+        nightVisionOverlay = findViewById(R.id.nightVisionOverlay);
 
-        Button captureButton = findViewById(R.id.captureButton);
+        ImageButton captureButton = findViewById(R.id.captureButton);
         captureButton.setOnClickListener(v -> takePhoto());
+
+        LinearLayout modeBar = (LinearLayout) findViewById(R.id.previewView).getRootView()
+                .findViewById(android.R.id.content);
+
+        TextView nightModeText = findNightModeTextView();
+        if (nightModeText != null) {
+            nightModeText.setOnClickListener(v -> toggleNightVision(nightModeText));
+        }
 
         if (allPermissionsGranted()) {
             startCamera();
         } else {
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS);
+        }
+    }
+
+    private TextView findNightModeTextView() {
+        View root = findViewById(android.R.id.content);
+        return findTextViewByText(root, "ليلي");
+    }
+
+    private TextView findTextViewByText(View view, String text) {
+        if (view instanceof TextView) {
+            TextView tv = (TextView) view;
+            if (text.equals(tv.getText().toString())) {
+                return tv;
+            }
+        } else if (view instanceof android.view.ViewGroup) {
+            android.view.ViewGroup group = (android.view.ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                TextView result = findTextViewByText(group.getChildAt(i), text);
+                if (result != null) return result;
+            }
+        }
+        return null;
+    }
+
+    private void toggleNightVision(TextView label) {
+        nightModeOn = !nightModeOn;
+        if (nightModeOn) {
+            nightVisionOverlay.setVisibility(View.VISIBLE);
+            label.setTextColor(0xFF00FF00);
+            label.setTypeface(null, android.graphics.Typeface.BOLD);
+        } else {
+            nightVisionOverlay.setVisibility(View.GONE);
+            label.setTextColor(0xFFFFFFFF);
+            label.setTypeface(null, android.graphics.Typeface.NORMAL);
         }
     }
 
@@ -82,19 +130,12 @@ public class MainActivity extends AppCompatActivity {
                 extensionsManagerFuture.addListener(() -> {
                     try {
                         ExtensionsManager extensionsManager = extensionsManagerFuture.get();
-
                         CameraSelector baseCameraSelector = CameraSelector.DEFAULT_BACK_CAMERA;
                         CameraSelector cameraSelector = baseCameraSelector;
 
-                        boolean nightAvailable = extensionsManager.isExtensionAvailable(
-                                baseCameraSelector, ExtensionMode.NIGHT);
-
-                        if (nightAvailable) {
-                            Log.d(TAG, "Night mode available");
+                        if (extensionsManager.isExtensionAvailable(baseCameraSelector, ExtensionMode.NIGHT)) {
                             cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(
                                     baseCameraSelector, ExtensionMode.NIGHT);
-                        } else {
-                            Log.d(TAG, "Night mode not supported");
                         }
 
                         Preview preview = new Preview.Builder().build();
@@ -105,8 +146,7 @@ public class MainActivity extends AppCompatActivity {
                                 .build();
 
                         cameraProvider.unbindAll();
-                        cameraProvider.bindToLifecycle(
-                                this, cameraSelector, preview, imageCapture);
+                        cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
 
                     } catch (ExecutionException | InterruptedException e) {
                         Log.e(TAG, "Extensions error: " + e.getMessage());
@@ -144,13 +184,13 @@ public class MainActivity extends AppCompatActivity {
                 new ImageCapture.OnImageSavedCallback() {
                     @Override
                     public void onImageSaved(ImageCapture.OutputFileResults outputFileResults) {
-                        Toast.makeText(getBaseContext(), "تم حفظ الصورة ✅", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getBaseContext(), "تم حفظ الصورة", Toast.LENGTH_SHORT).show();
                     }
 
                     @Override
                     public void onError(ImageCaptureException exception) {
                         Log.e(TAG, "خطأ بالتقاط الصورة: " + exception.getMessage());
-                        Toast.makeText(getBaseContext(), "فشل الالتقاط ❌", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(getBaseContext(), "فشل الالتقاط", Toast.LENGTH_SHORT).show();
                     }
                 }
         );

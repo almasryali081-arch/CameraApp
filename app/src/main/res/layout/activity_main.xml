@@ -10,6 +10,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <View
+        android:id="@+id/nightVisionOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#4000FF00"
+        android:visibility="gone" />
+
     <ImageButton
         android:id="@+id/flashButton"
         android:layout_width="48dp"
@@ -84,7 +91,7 @@
             android:layout_marginStart="32dp"
             android:background="#333333"
             android:scaleType="centerCrop"
-            android:contentDescription="آخر صورة" />
+            android:contentDescription="عليالمصري" />
 
         <ImageButton
             android:id="@+id/captureButton"
