@@ -48,7 +48,6 @@ public class MainActivity extends AppCompatActivity {
         ImageButton captureButton = findViewById(R.id.captureButton);
         captureButton.setOnClickListener(v -> takePhoto());
 
-        LinearLayout modeBar = (LinearLayout) findViewById(R.id.previewView).getRootView()
                 .findViewById(android.R.id.content);
 
         TextView nightModeText = findNightModeTextView();
