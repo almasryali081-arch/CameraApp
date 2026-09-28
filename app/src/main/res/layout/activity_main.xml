@@ -14,7 +14,7 @@
         android:id="@+id/nightVisionOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#4000FF00"
+        android:background="#6600FF00"
         android:visibility="gone" />
 
     <LinearLayout
@@ -100,6 +100,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:padding="8dp"
+            android:id="@+id/portraitLabel"
             android:text="بورتريه"
             android:textColor="#FFFFFF"
             android:textSize="14sp" />
@@ -110,6 +111,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:padding="8dp"
+            android:id="@+id/photoLabel"
             android:text="صورة"
             android:textColor="#FFD700"
             android:textSize="14sp"
@@ -121,6 +123,7 @@
             android:layout_weight="1"
             android:gravity="center"
             android:padding="8dp"
+            android:id="@+id/videoLabel"
             android:text="فيديو"
             android:textColor="#FFFFFF"
             android:textSize="14sp" />

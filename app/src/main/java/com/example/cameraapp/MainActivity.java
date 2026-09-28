@@ -33,6 +33,14 @@ import androidx.camera.core.ZoomState;
 import androidx.camera.extensions.ExtensionMode;
 import androidx.camera.extensions.ExtensionsManager;
 import androidx.camera.lifecycle.ProcessCameraProvider;
+import androidx.camera.video.MediaStoreOutputOptions;
+import androidx.camera.video.PendingRecording;
+import androidx.camera.video.Quality;
+import androidx.camera.video.QualitySelector;
+import androidx.camera.video.Recorder;
+import androidx.camera.video.Recording;
+import androidx.camera.video.VideoCapture;
+import androidx.camera.video.VideoRecordEvent;
 import androidx.camera.view.PreviewView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -44,26 +52,37 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "CameraApp";
     private static final int REQUEST_CODE_PERMISSIONS = 10;
-    private static final String[] REQUIRED_PERMISSIONS = {Manifest.permission.CAMERA};
+    private static final String[] REQUESTED_PERMISSIONS = {
+            Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO};
+    private static final int MODE_PHOTO = 0;
+    private static final int MODE_VIDEO = 1;
 
     private PreviewView previewView;
     private View nightVisionOverlay;
+    private View captureButton;
     private TextView flashButton;
     private TextView timerButton;
     private TextView zoomText;
     private TextView countdownText;
     private TextView nightModeLabel;
+    private TextView portraitLabel;
+    private TextView photoLabel;
+    private TextView videoLabel;
     private ImageView thumbnailView;
 
     private ImageCapture imageCapture;
+    private VideoCapture<Recorder> videoCapture;
+    private Recording recording;
     private Camera camera;
     private ScaleGestureDetector scaleDetector;
     private GestureDetector gestureDetector;
     private final Handler handler = new Handler(Looper.getMainLooper());
 
+    private int captureMode = MODE_PHOTO;
     private int lensFacing = CameraSelector.LENS_FACING_BACK;
     private int flashMode = ImageCapture.FLASH_MODE_OFF;
     private boolean nightModeOn = false;
+    private boolean portraitOn = false;
     private boolean timerOn = false;
     private boolean counting = false;
     private Uri lastPhotoUri = null;
@@ -75,28 +94,54 @@ public class MainActivity extends AppCompatActivity {
 
         previewView = findViewById(R.id.previewView);
         nightVisionOverlay = findViewById(R.id.nightVisionOverlay);
+        captureButton = findViewById(R.id.captureButton);
         flashButton = findViewById(R.id.flashButton);
         timerButton = findViewById(R.id.timerButton);
         zoomText = findViewById(R.id.zoomText);
         countdownText = findViewById(R.id.countdownText);
         nightModeLabel = findViewById(R.id.nightModeLabel);
+        portraitLabel = findViewById(R.id.portraitLabel);
+        photoLabel = findViewById(R.id.photoLabel);
+        videoLabel = findViewById(R.id.videoLabel);
         thumbnailView = findViewById(R.id.thumbnailView);
 
-        findViewById(R.id.captureButton).setOnClickListener(v -> onCaptureRequested());
+        captureButton.setOnClickListener(v -> onCaptureRequested());
         findViewById(R.id.switchCameraButton).setOnClickListener(v -> switchCamera());
         flashButton.setOnClickListener(v -> cycleFlash());
         timerButton.setOnClickListener(v -> toggleTimer());
-        nightModeLabel.setOnClickListener(v -> toggleNightVision());
+        nightModeLabel.setOnClickListener(v -> toggleNight());
+        portraitLabel.setOnClickListener(v -> togglePortrait());
+        photoLabel.setOnClickListener(v -> setMode(MODE_PHOTO));
+        videoLabel.setOnClickListener(v -> setMode(MODE_VIDEO));
         thumbnailView.setOnClickListener(v -> openLastPhoto());
 
         setupTouchControls();
         updateFlashLabel();
         updateTimerLabel();
+        updateModeLabels();
 
-        if (allPermissionsGranted()) {
+        if (cameraGranted()) {
             startCamera();
         } else {
-            ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS);
+            ActivityCompat.requestPermissions(this, REQUESTED_PERMISSIONS, REQUEST_CODE_PERMISSIONS);
+        }
+    }
+
+    private boolean cameraGranted() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean audioGranted() {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_CODE_PERMISSIONS && cameraGranted()) {
+            startCamera();
         }
     }
 
@@ -175,7 +220,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateTimerLabel() {
-        if (timerOn) {
+        if (recording != null) {
+            timerButton.setText("● تسجيل");
+            timerButton.setTextColor(0xFFFF3B30);
+        } else if (timerOn) {
             timerButton.setText("⏱ 2 ث");
             timerButton.setTextColor(0xFFFFD700);
         } else {
@@ -184,20 +232,53 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void toggleNightVision() {
+    private void setLabel(TextView label, boolean active, int activeColor) {
+        label.setTextColor(active ? activeColor : 0xFFFFFFFF);
+        label.setTypeface(null, active ? Typeface.BOLD : Typeface.NORMAL);
+    }
+
+    private void updateModeLabels() {
+        setLabel(nightModeLabel, nightModeOn, 0xFF00FF00);
+        setLabel(portraitLabel, portraitOn, 0xFFFFD700);
+        setLabel(photoLabel, captureMode == MODE_PHOTO, 0xFFFFD700);
+        setLabel(videoLabel, captureMode == MODE_VIDEO, 0xFFFFD700);
+        nightVisionOverlay.setVisibility(nightModeOn ? View.VISIBLE : View.GONE);
+    }
+
+    private void toggleNight() {
+        if (recording != null) return;
         nightModeOn = !nightModeOn;
-        if (nightModeOn) {
-            nightVisionOverlay.setVisibility(View.VISIBLE);
-            nightModeLabel.setTextColor(0xFF00FF00);
-            nightModeLabel.setTypeface(null, Typeface.BOLD);
-        } else {
-            nightVisionOverlay.setVisibility(View.GONE);
-            nightModeLabel.setTextColor(0xFFFFFFFF);
-            nightModeLabel.setTypeface(null, Typeface.NORMAL);
+        if (nightModeOn) portraitOn = false;
+        updateModeLabels();
+        startCamera();
+    }
+
+    private void togglePortrait() {
+        if (recording != null) return;
+        if (captureMode == MODE_VIDEO) {
+            Toast.makeText(this, "البورتريه متاح في وضع الصورة فقط", Toast.LENGTH_SHORT).show();
+            return;
         }
+        portraitOn = !portraitOn;
+        if (portraitOn) nightModeOn = false;
+        updateModeLabels();
+        startCamera();
+    }
+
+    private void setMode(int mode) {
+        if (recording != null) {
+            Toast.makeText(this, "أوقف التسجيل أولاً", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (captureMode == mode) return;
+        captureMode = mode;
+        if (mode == MODE_VIDEO) portraitOn = false;
+        updateModeLabels();
+        startCamera();
     }
 
     private void switchCamera() {
+        if (recording != null) return;
         if (lensFacing == CameraSelector.LENS_FACING_BACK) {
             lensFacing = CameraSelector.LENS_FACING_FRONT;
         } else {
@@ -229,63 +310,80 @@ public class MainActivity extends AppCompatActivity {
         return super.onKeyDown(keyCode, event);
     }
 
-    private boolean allPermissionsGranted() {
-        for (String permission : REQUIRED_PERMISSIONS) {
-            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                return false;
-            }
-        }
-        return true;
-    }
-
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode == REQUEST_CODE_PERMISSIONS && allPermissionsGranted()) {
-            startCamera();
-        }
+    protected void onDestroy() {
+        super.onDestroy();
+        handler.removeCallbacksAndMessages(null);
     }
 
     private void startCamera() {
-        ListenableFuture<ProcessCameraProvider> cameraProviderFuture =
+        ListenableFuture<ProcessCameraProvider> providerFuture =
                 ProcessCameraProvider.getInstance(this);
 
-        cameraProviderFuture.addListener(() -> {
+        providerFuture.addListener(() -> {
             try {
-                ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
+                ProcessCameraProvider provider = providerFuture.get();
 
-                ListenableFuture<ExtensionsManager> extensionsManagerFuture =
-                        ExtensionsManager.getInstanceAsync(getApplicationContext(), cameraProvider);
+                ListenableFuture<ExtensionsManager> extFuture =
+                        ExtensionsManager.getInstanceAsync(getApplicationContext(), provider);
 
-                extensionsManagerFuture.addListener(() -> {
+                extFuture.addListener(() -> {
                     try {
-                        ExtensionsManager extensionsManager = extensionsManagerFuture.get();
+                        ExtensionsManager extManager = extFuture.get();
 
-                        CameraSelector baseCameraSelector = new CameraSelector.Builder()
+                        CameraSelector base = new CameraSelector.Builder()
                                 .requireLensFacing(lensFacing)
                                 .build();
-                        CameraSelector cameraSelector = baseCameraSelector;
-
-                        if (extensionsManager.isExtensionAvailable(baseCameraSelector, ExtensionMode.NIGHT)) {
-                            cameraSelector = extensionsManager.getExtensionEnabledCameraSelector(
-                                    baseCameraSelector, ExtensionMode.NIGHT);
-                        }
 
                         Preview preview = new Preview.Builder().build();
                         preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-                        imageCapture = new ImageCapture.Builder()
-                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-                                .setFlashMode(flashMode)
-                                .build();
+                        provider.unbindAll();
 
-                        cameraProvider.unbindAll();
-                        camera = cameraProvider.bindToLifecycle(this, cameraSelector, preview, imageCapture);
+                        if (captureMode == MODE_VIDEO) {
+                            imageCapture = null;
+                            Recorder recorder = new Recorder.Builder()
+                                    .setQualitySelector(QualitySelector.from(Quality.HIGHEST))
+                                    .build();
+                            videoCapture = VideoCapture.withOutput(recorder);
+                            camera = provider.bindToLifecycle(this, base, preview, videoCapture);
+                        } else {
+                            videoCapture = null;
+                            CameraSelector selector = base;
+
+                            int ext = ExtensionMode.NONE;
+                            if (nightModeOn) {
+                                ext = ExtensionMode.NIGHT;
+                            } else if (portraitOn) {
+                                ext = ExtensionMode.BOKEH;
+                            }
+
+                            if (ext != ExtensionMode.NONE) {
+                                if (extManager.isExtensionAvailable(base, ext)) {
+                                    selector = extManager.getExtensionEnabledCameraSelector(base, ext);
+                                } else if (ext == ExtensionMode.BOKEH) {
+                                    portraitOn = false;
+                                    updateModeLabels();
+                                    Toast.makeText(this, "البورتريه غير مدعوم على هذا الجهاز",
+                                            Toast.LENGTH_LONG).show();
+                                } else {
+                                    Toast.makeText(this,
+                                            "الوضع الليلي الحقيقي غير مدعوم على جهازك، تم تفعيل التأثير الأخضر فقط",
+                                            Toast.LENGTH_LONG).show();
+                                }
+                            }
+
+                            imageCapture = new ImageCapture.Builder()
+                                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                                    .setFlashMode(flashMode)
+                                    .build();
+                            camera = provider.bindToLifecycle(this, selector, preview, imageCapture);
+                        }
                         zoomText.setText("1.0x");
 
                     } catch (Exception e) {
                         Log.e(TAG, "Camera error: " + e.getMessage());
-                        Toast.makeText(this, "تعذر تشغيل هذه الكاميرا", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(this, "تعذر تشغيل الكاميرا بهذا الوضع", Toast.LENGTH_SHORT).show();
                     }
                 }, ContextCompat.getMainExecutor(this));
 
@@ -296,6 +394,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void onCaptureRequested() {
+        if (captureMode == MODE_VIDEO) {
+            toggleRecording();
+            return;
+        }
         if (counting) return;
         if (timerOn) {
             counting = true;
@@ -310,6 +412,52 @@ public class MainActivity extends AppCompatActivity {
         } else {
             takePhoto();
         }
+    }
+
+    private void toggleRecording() {
+        if (videoCapture == null) return;
+
+        if (recording != null) {
+            recording.stop();
+            return;
+        }
+
+        String name = new SimpleDateFormat("yyyy-MM-dd-HH-mm-ss-SSS", Locale.US)
+                .format(System.currentTimeMillis());
+
+        ContentValues contentValues = new ContentValues();
+        contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
+            contentValues.put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/CameraApp");
+        }
+
+        MediaStoreOutputOptions options = new MediaStoreOutputOptions.Builder(
+                getContentResolver(), MediaStore.Video.Media.EXTERNAL_CONTENT_URI)
+                .setContentValues(contentValues)
+                .build();
+
+        PendingRecording pending = videoCapture.getOutput().prepareRecording(this, options);
+        if (audioGranted()) {
+            pending = pending.withAudioEnabled();
+        }
+
+        recording = pending.start(ContextCompat.getMainExecutor(this), event -> {
+            if (event instanceof VideoRecordEvent.Start) {
+                captureButton.setAlpha(0.5f);
+                updateTimerLabel();
+            } else if (event instanceof VideoRecordEvent.Finalize) {
+                VideoRecordEvent.Finalize finalizeEvent = (VideoRecordEvent.Finalize) event;
+                recording = null;
+                captureButton.setAlpha(1.0f);
+                updateTimerLabel();
+                if (!finalizeEvent.hasError()) {
+                    Toast.makeText(this, "تم حفظ الفيديو", Toast.LENGTH_SHORT).show();
+                } else {
+                    Log.e(TAG, "Video error code: " + finalizeEvent.getError());
+                    Toast.makeText(this, "فشل حفظ الفيديو", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
     }
 
     private void takePhoto() {
