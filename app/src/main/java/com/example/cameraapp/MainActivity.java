@@ -1,4 +1,3 @@
-cat > ~/CameraApp/app/src/main/java/com/example/cameraapp/MainActivity.java << 'EOF'
 package com.example.cameraapp;
 
 import android.Manifest;
@@ -355,4 +354,3 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 }
-EOF
